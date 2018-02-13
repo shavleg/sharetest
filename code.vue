@@ -81,8 +81,9 @@
       </div>
     </div>
     <div class="social_comments" v-bind:id="'social_comments_'+comment.id">
- 
-      <div class="fb-comments"  v-if="ok" v-bind:data-href="href_data+'/'+comment.id" data-numposts="5"></div>
+
+      <div class="fb-comments"   v-bind:data-href="href_data+'/'+comment.id" data-numposts="5"></div>
+
     </div>
   </div>
 </template>
@@ -184,9 +185,7 @@
 
     mounted () {
 
-      this.$nextTick(function () {
-  this.ok=true;
-})
+
 
       //$('.fb-comments').attr('data-href',document.location.href);
       // Scroll to comment
@@ -197,6 +196,16 @@
           }, 500)
         }, 500)
       }
+
+            this.$nextTick(function () {
+    (function(d, s, id) {
+        var js, fjs = d.getElementsByTagName(s)[0];
+        if (d.getElementById(id)) return;
+        js = d.createElement(s); js.id = id;
+        js.src = 'https://connect.facebook.net/ka_GE/sdk.js#xfbml=1&version=v2.12';
+        fjs.parentNode.insertBefore(js, fjs);
+      }(document, 'script', 'facebook-jssdk'))
+  })
     }
   }
 </script>
