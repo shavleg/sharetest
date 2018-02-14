@@ -82,10 +82,10 @@ export default {
     }
   },
   methods: {
-    updateCover(avatar) {
+    updateCover(cover) {
       this.$progress.start();
       //UserService.updateAvatar(this.user.id, avatar)
-      UserService.updateAvatar(1, avatar)
+      UserService.updateAvatar(1, cover)
         .then(() => this.fetchUser())
         .finally(() => this.$progress.done());
     }
