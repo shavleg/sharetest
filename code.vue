@@ -1,160 +1,145 @@
-<template>
-  <div class="eleven wide computer sixteen wide mobile centered column">
-    <div class="ui items">
-      <div class="item">
-        <!-- Avatar -->
-        <!-- <div class="ui small circular image">
-          <img :src="'https://avtorebi.com/img/ZsjhAUfRpalj9ncI.jpg?w=192&h=192&fit=crop'">
-           <a href="#"><span class="edit icon"></span></a>
-        </div> -->
+<?php
 
-                <!-- Avatar -->
-        <div ref="cover"
-          class="ui small circular image"
+namespace App\Http\Controllers;
+use DB;
+use Carbon\Carbon;
+use App\Models\User;
+use App\Models\Comment;
+use App\Traits\Commentable;
+use Illuminate\Http\Request;
+use App\Traits\ValidatesRouteParams;
+use Illuminate\Database\Eloquent\Model;
+use App\Transformers\CommentTransformer;
+use App\Traits\AcceptsRequestRelationships;
 
-        >
-          <!-- <div class="ui dimmer">
-            <div class="content">
-              <div class="center">
-                <div @click="$refs.avatarSelect.click()" class="ui small purple button kaps fw-bold">
-                  შეცვლა
-                </div>
-              </div>
-            </div>
-          </div> -->
-          <img :src="'https://avtorebi.com/img/ZsjhAUfRpalj9ncI.jpg?w=192&h=192&fit=crop'">
-          <div class="overlay"></div>
-  <div class="button"><a @click="$refs.coverSelect.click()" > შეცვლა </a></div>
-        </div>
-        <input ref="coverSelect" type="file" accept="image/*" style="display: none;">
+class CommentController extends Controller
+{
+    use ValidatesRouteParams, AcceptsRequestRelationships;
 
-        <div class="content" style="margin: auto; text-align: ლეფტ;">
-          <!-- Name -->
-          <div class="ui large header" >
-            {{ tags.list[0].name }}
-          </div>
-
-          <!-- Follow -->
-          <follow-button
-            v-if="isMe"
-            :user="posts"
-            :styles='{ "margin-left": "10px", "vertical-align": "super" }'
-            @toggle="true"
-          ></follow-button>
-
-          <!-- About -->
-          <div class="meta">
-            <span>{{ tags.list[0].slug }}</span>
-          </div>
-
-          <!-- Author Types -->
-          <!-- <div class="description">
-            <span v-for="type in tags">
-              {{ type.name }} &#9651;
-            </span>
-          </div> -->
-        </div>
-      </div>
-    </div>
-  </div>
-</template>
-
-<script>
-import FollowButton from "../../components/FollowButton.vue";
-
-export default {
-  components: { FollowButton },
-
-  props: {
-    posts: {
-      type: Object,
-      required: true
-    },
-    tags: {
-      type: Object,
-      required: true
+    public function __construct()
+    {
+        $this->authorizeResource(Comment::class);
     }
-  },
 
-  computed: {
-    isMe() {
-      return true; /*this.$store.state.user.id === this.tags.id*/
+    /**
+     * @param Comment $comment
+     *
+     * @return array
+     */
+    public function view(Comment $comment)
+    {
+        return $this->prepare($comment);
     }
-  },
-  methods: {
-    updateCover(cover) {
-      this.$progress.start();
-      //UserService.updateAvatar(this.user.id, avatar)
-      UserService.updateAvatar(1, cover)
-        .then(() => this.fetchUser())
-        .finally(() => this.$progress.done());
+
+    /**
+     * @param Request           $request
+     * @param Model|Commentable $model
+     *
+     * @return array
+     */
+    public function create(Request $request, Model $model)
+    {
+        $this->validateRouteParams(['model' => 'uses:'.Commentable::class]);
+        $this->validate($request, ['content' => 'required|min:1']);
+
+        $check = Comment::where('commentable_id', '=', $request->get('post'))->where('enabled', '=', 0)->where('draft', '=', 1)->where('user_id', '=', auth()->user()->id)->get();
+
+        if($check->count() > 0)
+        {
+          $deleteRecord = Comment::where('commentable_id', '=', $request->get('post'))->where('enabled', '=', 0)->where('draft', '=', 1)->where('user_id', '=', auth()->user()->id)->delete();
+
+        }
+        //else if($check->count() <= 0)
+        $comment = $model->attachComment(auth()->user(), $request->get('content'), $request->get('enabled'), $request->get('draft'));
+
+        return $this->prepare($comment);
     }
-  },
-  mounted() {
-    this.$progress.done();
-    this.$nextTick(() => {
-      $(this.$refs.coverSelect).on("change", evt => {
-        alert();
-        this.updateCover(evt.target.files[0]);
-      });
 
-      // this.setSelectedAuthorTypes(this.user.author_types)
-    });
-  }
-};
-</script>
+    public function stats(User $user)
+    {
+        $includes = 'views,votes,comments';
+        $excludes = 'content,tags';
+        $range    = request('filter.range');
+        $comment    = $user->publishedcomment()->latestFirst();
 
-<style>
-.ui.small.image {
-  position: relative;
-  /* margin-top: 50px;*/
-  width: 100px;
-  height: 100px;
+        if ($range) {
+            $end_date = Carbon::now();
+
+            switch ($range) {
+                case 'LAST_THREE_MONTHS':
+                    $start_date = Carbon::now()->subMonths(3);
+                    break;
+
+                case 'LAST_THIRTY_DAYS':
+                    $start_date = Carbon::now()->subDays(30);
+                    break;
+
+                case 'LAST_SEVEN_DAYS':
+                    $start_date = Carbon::now()->subDays(7);
+                    break;
+            }
+        }
+
+        if (isset($start_date) && isset($end_date)) {
+            $comment->whereBetween('created_at', [$start_date, $end_date]);
+        }
+
+        return fractal()
+            ->collection($comment->get())
+            ->transformWith(new CommentTransformer)
+            ->parseIncludes($includes)
+            ->parseExcludes($excludes)
+            ->toArray();
+    }
+
+    public function favorites(User $user)
+    {
+        $includes = 'views,votes,comments';
+        $excludes = 'content,tags';
+        $comment = DB::table('comments')->join('favorites', 'comments.id', '=', 'favorites.comment_id')->where('favorites.user_id', '=', $user->id)->get();
+        
+        return $this->prepare($comment);
+    }
+
+    /**
+     * @param Request $request
+     * @param Comment $comment
+     *
+     * @return array
+     */
+    public function update(Request $request, Comment $comment)
+    {
+        $this->validate($request, ['content' => 'required|min:1']);
+
+        $comment->content = $request->get('content');
+        if ($request->has('enabled'))
+        $comment->enabled = $request->get('enabled');
+        if ($request->has('draft'))
+        $comment->draft = $request->get('draft');
+        $comment->save();
+
+        return $this->prepare($comment);
+    }
+
+    /**
+     * @param Comment $comment
+     *
+     * @return array
+     */
+    public function delete(Comment $comment)
+    {
+        $comment->delete();
+
+        return $this->prepare($comment);
+    }
+
+    protected function prepare(Comment $comment)
+    {
+        return fractal()
+            ->item($comment)
+            ->transformWith(new CommentTransformer)
+            ->parseIncludes($this->getIncludes())
+            ->parseExcludes($this->getExcludes())
+            ->toArray();
+    }
 }
-
-.ui.small.image .overlay {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  background: rgba(0, 0, 0, 0);
-  transition: background 0.5s ease;
-}
-
-.ui.small.image:hover .overlay {
-  display: block;
-  background: rgba(0, 0, 0, 0.3);
-}
-
-.ui.small.image img {
-  position: absolute;
-  width: 100px;
-  height: 100px;
-  left: 0;
-}
-
-.ui.small.image .button {
-  position: absolute;
-  width: 100px;
-  left: 0;
-  top: 40px;
-  text-align: center;
-  opacity: 0;
-  transition: opacity 0.35s ease;
-}
-
-.ui.small.image .button a {
-  /* width: 200px; */
-  padding: 12px 4px;
-  text-align: center;
-  color: white;
-  border: solid 2px white;
-  z-index: 1;
-  background-color: #a333c8;
-}
-
-.ui.small.image:hover .button {
-  opacity: 1;
-}
-</style>
